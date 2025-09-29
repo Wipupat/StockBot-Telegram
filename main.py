@@ -167,6 +167,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def add_trade(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     """
     /add Buy TSLA 431.89 1 fee=0.46 at=2025-09-26 13:18
     order:   0    1   2     3     4
@@ -188,10 +189,11 @@ async def add_trade(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO trades (tx_time, source, action, symbol, qty, price, fee)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-                (tx_time, "text", action, symbol.upper(), float(qty), float(price), fee),
+                """INSERT INTO trades (telegram_user_id, tx_time, source, action, symbol, qty, price, fee)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                (user_id, tx_time, "text", action, symbol.upper(), float(qty), float(price), fee),
             )
+
             conn.commit()
 
         await update.message.reply_text(
@@ -201,18 +203,20 @@ async def add_trade(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"⚠️ Error: {e}")
 
 async def sum_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     if not context.args:
         return await update.message.reply_text("Usage: /sum SYMBOL")
     symbol = context.args[0].upper()
 
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            """SELECT created_at, tx_time, action, symbol, qty, price, fee
-               FROM trades
-               WHERE symbol=%s
-               ORDER BY COALESCE(tx_time, created_at) ASC""",
-            (symbol,),
+        """SELECT created_at, tx_time, action, symbol, qty, price, fee
+        FROM trades
+        WHERE telegram_user_id=%s AND symbol=%s
+        ORDER BY COALESCE(tx_time, created_at) ASC""",
+        (user_id, symbol),
         )
+
         rows = cur.fetchall()
 
     if not rows:
@@ -245,6 +249,7 @@ async def sum_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def profit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # If symbol provided, compute for that symbol; else for all
+    user_id = update.effective_user.id
     with get_conn() as conn, conn.cursor() as cur:
         if context.args:
             symbol = context.args[0].upper()
@@ -273,9 +278,10 @@ async def profit(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for sym in symbols:
                 cur.execute(
                     """SELECT created_at, tx_time, action, symbol, qty, price, fee
-                       FROM trades WHERE symbol=%s
-                       ORDER BY COALESCE(tx_time, created_at) ASC""",
-                    (sym,),
+                    FROM trades
+                    WHERE telegram_user_id=%s AND symbol=%s
+                    ORDER BY COALESCE(tx_time, created_at) ASC""",
+                    (user_id, symbol),
                 )
                 rows = cur.fetchall()
                 realized, _, _ = realized_pnl_fifo(rows)
