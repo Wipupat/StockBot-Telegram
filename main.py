@@ -365,7 +365,9 @@ def ocr_extract(text: str):
     m_sym = re.search(r"\b([A-Z]{1,5})\b", text)
     symbol = m_sym.group(1) if m_sym else None
 
-    m_price = re.search(r"(?:US\$)?([0-9]+(?:\.[0-9]+)?)", text)
+    # m_price = re.search(r"(?:US\$)?([0-9]+(?:\.[0-9]+)?)", text)
+    m_price = re.search(r"([0-9]+[.,][0-9]{2})", text.replace(" ", ""))
+
     price = float(m_price.group(1)) if m_price else None
 
     m_qty = re.search(r"(?:Qty|จำนวน)\s*[:=]?\s*([0-9]+)", text, re.I)
@@ -386,6 +388,12 @@ def preprocess_image(img_path):
     img = img.point(lambda x: 0 if x < 140 else 255)  # binarize
     img = img.filter(ImageFilter.SHARPEN)
     return img
+def clean_ocr_text(text: str) -> str:
+    # remove duplicate spaces
+    text = re.sub(r"\s+", " ", text)
+    # remove stray symbols like < or FG
+    text = re.sub(r"[^A-Za-z0-9ก-๙\.\s:/]", "", text)
+    return text.strip()
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not USE_OCR:
@@ -405,6 +413,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         img = img.resize((img.width*2, img.height*2), Image.LANCZOS)
         img = ImageEnhance.Contrast(img).enhance(2.0)
         text = pytesseract.image_to_string(img, lang="eng+tha")
+        text = clean_ocr_text(text)
 
         # Show raw OCR result to user (escaped for Markdown)
         safe_text = escape_markdown(text.strip() or "(empty)", version=2)
