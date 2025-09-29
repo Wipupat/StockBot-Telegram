@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y \
     libtesseract-dev \
     libleptonica-dev \
     && rm -rf /var/lib/apt/lists/*
-
+RUN sudo apt-get install -y tesseract-ocr-tha
 # Set working dir
 WORKDIR /app
 
