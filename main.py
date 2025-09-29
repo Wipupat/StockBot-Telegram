@@ -412,7 +412,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         img = preprocess_image(tmp_path)  # <-- grayscale + binarize + sharpen
         img = img.resize((img.width*2, img.height*2), Image.LANCZOS)
         img = ImageEnhance.Contrast(img).enhance(2.0)
-        text = pytesseract.image_to_string(img, lang="eng+tha")
+        text = pytesseract.image_to_string(img, lang="eng")
         text = clean_ocr_text(text)
 
         # Show raw OCR result to user (escaped for Markdown)
