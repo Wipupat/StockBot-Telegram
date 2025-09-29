@@ -156,6 +156,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/export      — CSV of all trades"
     )
 
+async def add_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Rewrite message to look like /add Buy ...
+    if len(context.args) < 3:
+        return await update.message.reply_text("Usage:\n/addb SYMBOL PRICE QTY [fee=0.00] [at=YYYY-MM-DD HH:MM]")
+    new_text = f"/add Buy {' '.join(context.args)}"
+    update.message.text = new_text
+    return await add_trade(update, context)
+
+
+async def add_sell(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Rewrite message to look like /add Sell ...
+    if len(context.args) < 3:
+        return await update.message.reply_text("Usage:\n/adds SYMBOL PRICE QTY [fee=0.00] [at=YYYY-MM-DD HH:MM]")
+    new_text = f"/add Sell {' '.join(context.args)}"
+    update.message.text = new_text
+    return await add_trade(update, context)
 
 async def add_trade(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -467,6 +483,8 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/start – Welcome message\n"
         "/help – Show this help\n"
         "/add Buy|Sell SYMBOL PRICE QTY [fee=0.00] [at=YYYY-MM-DD HH:MM]\n"
+        "/addb SYMBOL PRICE QTY [fee=...] – Quick *Buy*\n"
+        "/adds SYMBOL PRICE QTY [fee=...] – Quick *Sell*\n"
         "/profit [SYMBOL] – Show realized/open P&L\n"
         "/profit_today – Show today’s realized P&L\n"
         "/sum SYMBOL – List trades and totals\n"
@@ -483,6 +501,8 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("add", add_trade))
+    app.add_handler(CommandHandler("addb", add_buy))
+    app.add_handler(CommandHandler("adds", add_sell))
     app.add_handler(CommandHandler("sum", sum_symbol))
     app.add_handler(CommandHandler("profit", profit))
     app.add_handler(CommandHandler("profit_today", profit_today))
