@@ -11,7 +11,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py .
+# Copy everything
+COPY . .
 
 # Render calls this by default if you set it as the start command, or via render.yaml
 CMD ["python", "main.py"]
