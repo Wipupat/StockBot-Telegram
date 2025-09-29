@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: stock-telegram-bot
+    env: docker
+    plan: free
+    autoDeploy: true
+    region: oregon
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false     # set in dashboard
+      - key: DATABASE_URL
+        fromDatabase:
+          name: stockbot-db
+          property: connectionString
+
+databases:
+  - name: stockbot-db
+    plan: free
