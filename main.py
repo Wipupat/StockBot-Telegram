@@ -18,6 +18,7 @@ from telegram.ext import (
 import pytz
 from PIL import Image, ImageEnhance, ImageFilter
 from telegram.helpers import escape_markdown
+import yfinance as yf
 
 # ---- Config ----
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -31,6 +32,16 @@ try:
 except Exception:
     USE_OCR = False
 
+
+
+def get_latest_price(symbol):
+    try:
+        ticker = yf.Ticker(symbol)
+        data = ticker.history(period="1d")
+        return float(data["Close"].iloc[-1])
+    except Exception as e:
+        print("⚠️ Price fetch failed:", e)
+        return None
 
 # ---- DB helpers ----
 def get_conn():
@@ -241,6 +252,16 @@ async def sum_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"\nRealized P&L: {fmt_money(realized)}\n"
         f"Open Position: {open_qty:.4f} shares @ avg cost ${avg_cost:.2f}"
     )
+    latest_price = get_latest_price(symbol)
+    if latest_price:
+        unrealized = (latest_price - avg_cost) * open_qty
+        summary += (
+            f"\nLatest Price: ${latest_price:.2f}"
+            f"\nUnrealized P&L: {fmt_money(unrealized)}"
+            f"\nTotal P&L (Realized+Unrealized): {fmt_money(realized + unrealized)}"
+        )
+    else:
+        summary += "\n⚠️ Could not fetch latest price."
 
     safe_text = escape_markdown(table_text + summary, version=2)
     await update.message.reply_text(safe_text, parse_mode=ParseMode.MARKDOWN_V2)
@@ -480,15 +501,15 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         "📖 *Available Commands*\n\n"
-        "/start – Welcome message\n"
-        "/help – Show this help\n"
-        "/add Buy|Sell SYMBOL PRICE QTY [fee=0.00] [at=YYYY-MM-DD HH:MM]\n"
-        "/addb SYMBOL PRICE QTY [fee=...] – Quick *Buy*\n"
-        "/adds SYMBOL PRICE QTY [fee=...] – Quick *Sell*\n"
-        "/profit [SYMBOL] – Show realized/open P&L\n"
-        "/profit_today – Show today’s realized P&L\n"
-        "/sum SYMBOL – List trades and totals\n"
-        "/export – Export all trades to CSV\n\n"
+        "\/start – Welcome message\n"
+        "\/help – Show this help\n"
+        "\/add Buy|Sell SYMBOL PRICE QTY [fee=0.00] [at=YYYY-MM-DD HH:MM]\n"
+        "\/addb SYMBOL PRICE QTY [fee=...] – Quick *Buy*\n"
+        "\/adds SYMBOL PRICE QTY [fee=...] – Quick *Sell*\n"
+        "\/profit [SYMBOL] – Show realized\/open P&L\n"
+        "\/profit\_today – Show today’s realized P&L\n"
+        "\/sum SYMBOL – List trades and totals\n"
+        "\/export – Export all trades to CSV\n\n"
         "You can also send a broker *screenshot*, I'll OCR it 📸"
     )
     await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
@@ -509,6 +530,8 @@ def main():
     app.add_handler(CommandHandler("export", export_csv))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^addb "), add_buy))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^adds "), add_sell))
 
     print("Bot is running...")
     app.run_polling()
