@@ -7,7 +7,7 @@ from collections import deque
 from datetime import datetime
 from server import run_server
 import threading
-
+import traceback
 import psycopg2
 import psycopg2.extras
 from telegram import Update, InputFile
@@ -15,6 +15,16 @@ from telegram.constants import ParseMode
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, ContextTypes, filters
 )
+import pytz
+from PIL import Image, ImageEnhance, ImageFilter
+from telegram.helpers import escape_markdown
+
+def preprocess_image(img_path):
+    img = Image.open(img_path)
+    img = img.convert("L")  # grayscale
+    img = img.point(lambda x: 0 if x < 140 else 255)  # binarize
+    img = img.filter(ImageFilter.SHARPEN)
+    return img
 
 # ---- Config ----
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -227,7 +237,11 @@ async def sum_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"\nRealized P&L: {fmt_money(realized)}\n"
         f"Open Position: {open_qty:.4f} shares @ avg cost ${avg_cost:.2f}"
     )
-    await update.message.reply_text(table_text + summary, parse_mode=ParseMode.MARKDOWN_V2)
+    
+    from telegram.helpers import escape_markdown
+
+    safe_text = escape_markdown(table_text + summary, version=2)
+    await update.message.reply_text(safe_text, parse_mode=ParseMode.MARKDOWN_V2)
 
 async def profit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # If symbol provided, compute for that symbol; else for all
@@ -269,6 +283,44 @@ async def profit(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 lines.append(f"{sym}: {fmt_money(realized)}")
             lines.append(f"— — —\nTotal: {fmt_money(total)}")
             await update.message.reply_text("\n".join(lines))
+async def profit_today(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # today = datetime.utcnow().date()  # today in UTC (you can adjust for timezone)
+    tz = pytz.timezone("Asia/Bangkok")
+    today = datetime.now(tz).date()
+    start = datetime.combine(today, datetime.min.time())
+    end = datetime.combine(today, datetime.max.time())
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT DISTINCT symbol FROM trades
+               WHERE COALESCE(tx_time, created_at) >= %s
+                 AND COALESCE(tx_time, created_at) <= %s
+               ORDER BY symbol""",
+            (start, end),
+        )
+        symbols = [r[0] for r in cur.fetchall()]
+        if not symbols:
+            return await update.message.reply_text("No trades today.")
+
+        lines = []
+        total = 0.0
+        for sym in symbols:
+            cur.execute(
+                """SELECT created_at, tx_time, action, symbol, qty, price, fee
+                   FROM trades
+                   WHERE symbol=%s
+                     AND COALESCE(tx_time, created_at) >= %s
+                     AND COALESCE(tx_time, created_at) <= %s
+                   ORDER BY COALESCE(tx_time, created_at) ASC""",
+                (sym, start, end),
+            )
+            rows = cur.fetchall()
+            realized, _, _ = realized_pnl_fifo(rows)
+            total += realized
+            lines.append(f"{sym}: {fmt_money(realized)}")
+
+        lines.append(f"— — —\nToday total: {fmt_money(total)}")
+        await update.message.reply_text("\n".join(lines))
 
 async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with get_conn() as conn, conn.cursor() as cur:
@@ -301,40 +353,35 @@ async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---- OCR from screenshots ----
 def ocr_extract(text: str):
-    """
-    Very lenient extraction from Thai/ENG broker receipts, e.g. Webull.
-    Tries to find action, symbol, price, qty, fee.
-    """
+    print("📝 OCR RAW:", repr(text))
+
     action = None
     if re.search(r"\b(Buy|ซื้อ)\b", text, re.I):
         action = "Buy"
     elif re.search(r"\b(Sell|ขาย)\b", text, re.I):
         action = "Sell"
 
-    # Symbol: 1-5 uppercase letters (fallback to common tickers if needed)
+    # Symbol
     m_sym = re.search(r"\b([A-Z]{1,5})\b", text)
     symbol = m_sym.group(1) if m_sym else None
 
-    # Prices may show as "US$431.89" or "$431.89" or "431.89"
-    m_price = re.search(r"(?:US\$|\$)?\s*([0-9]+(?:\.[0-9]+)?)", text)
+    # Price
+    m_price = re.search(r"(?:US\$)?([0-9]+(?:\.[0-9]+)?)", text)
     price = float(m_price.group(1)) if m_price else None
 
-    # Quantity e.g. "จำนวน 1" or "Qty 1"
-    m_qty = re.search(r"(?:Qty|จำนวนทั้งหมด|จำนวน)\D*([0-9]+(?:\.[0-9]+)?)", text, re.I)
-    qty = float(m_qty.group(1)) if m_qty else 1.0  # default 1 if unknown
+    # Qty
+    m_qty = re.search(r"(?:Qty|จำนวน)\s*[:=]?\s*([0-9]+)", text, re.I)
+    qty = float(m_qty.group(1)) if m_qty else 1.0
 
-    # Fee e.g. "ค่าธรรมเนียม US$0.46" or "Fee $0.48"
-    m_fee = re.search(r"(?:ค่าธรรมเนียม|Fee)\D*([0-9]+(?:\.[0-9]+)?)", text, re.I)
+    # Fee (look for "fee 0.46" or "ค่าธรรมเนียม 0.46")
+    m_fee = re.search(r"(?:fee|ค่าธรรมเนียม).*?(?:US\$)?([0-9]+\.[0-9]+)", text, re.I)
     fee = float(m_fee.group(1)) if m_fee else 0.0
 
-    # Date (optional)
-    tx_time = None
-    for pat in [r"(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})", r"(\d{2}/\d{2}/\d{4})", r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})", r"(\d{4}-\d{2}-\d{2})"]:
-        m = re.search(pat, text)
-        if m:
-            tx_time = parse_time(m.group(1))
-            break
+    # Timestamp (dd/mm/yyyy hh:mm)
+    m_time = re.search(r"(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})", text)
+    tx_time = parse_time(m_time.group(1)) if m_time else None
 
+    print(f"✅ OCR PARSED: action={action}, symbol={symbol}, price={price}, qty={qty}, fee={fee}, tx_time={tx_time}")
     return action, symbol, price, qty, fee, tx_time
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -348,7 +395,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from PIL import Image
         img = Image.open(io.BytesIO(byts)).convert("RGB")
         # Thai+English if available in your image; Dockerfile installs tesseract + tha+eng
-        text = pytesseract.image_to_string(img, lang="tha+eng")
+        text = pytesseract.image_to_string(img, lang="eng+tha")
+
         action, symbol, price, qty, fee, tx_time = ocr_extract(text)
 
         if not (action and symbol and price):
@@ -368,7 +416,21 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(msg)
 
     except Exception as e:
+        print("⚠️ OCR exception:", e)
+        traceback.print_exc()
         await update.message.reply_text(f"⚠️ OCR error: {e}")
+async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = (
+        "📖 *Available Commands*\n\n"
+        "/start – Welcome message\n"
+        "/help – Show this help\n"
+        "/add Buy|Sell SYMBOL PRICE QTY [fee=0.00] [at=YYYY-MM-DD HH:MM]\n"
+        "/profit [SYMBOL] – Show realized/open P&L\n"
+        "/sum SYMBOL – List trades and totals\n"
+        "/export – Export all trades to CSV\n\n"
+        "You can also send a broker *screenshot*, I'll OCR it 📸"
+    )
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
 
 # ---- App bootstrap ----
 def main():
@@ -381,6 +443,8 @@ def main():
     app.add_handler(CommandHandler("profit", profit))
     app.add_handler(CommandHandler("export", export_csv))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(CommandHandler("profit_today", profit_today))
 
     print("Bot is running...")
     app.run_polling()   # <-- no await
