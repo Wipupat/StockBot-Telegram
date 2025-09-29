@@ -380,11 +380,7 @@ async def main():
     app.add_handler(CommandHandler("export", export_csv))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
-    await app.initialize()
-    await app.start()
-    print("Bot is running.")
-    await app.updater.start_polling()
-    await app.updater.idle()
-
+    # simpler lifecycle in PTB v21
+    await app.run_polling()
 if __name__ == "__main__":
     asyncio.run(main())
