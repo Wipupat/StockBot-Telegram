@@ -369,7 +369,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"⚠️ OCR error: {e}")
 
 # ---- App bootstrap ----
-async def main():
+def main():
     init_db()
     app = Application.builder().token(BOT_TOKEN).build()
 
@@ -380,7 +380,9 @@ async def main():
     app.add_handler(CommandHandler("export", export_csv))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
-    # simpler lifecycle in PTB v21
-    await app.run_polling()
+    print("Bot is running...")
+    app.run_polling()   # <-- no await
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
+
