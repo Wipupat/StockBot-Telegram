@@ -412,8 +412,23 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         img = preprocess_image(tmp_path)  # <-- grayscale + binarize + sharpen
         img = img.resize((img.width*2, img.height*2), Image.LANCZOS)
         img = ImageEnhance.Contrast(img).enhance(2.0)
-        text = pytesseract.image_to_string(img, lang="eng+tha")
-        text = clean_ocr_text(text)
+        # text = pytesseract.image_to_string(img, lang="eng+tha")
+        # text = clean_ocr_text(text)
+        data = pytesseract.image_to_data(
+        img, output_type=pytesseract.Output.DICT, lang="eng")
+
+        # Collect words with reasonable confidence
+        words = []
+        for i, word in enumerate(data["text"]):
+            if word.strip() and int(data["conf"][i]) > 60:  # filter out junk
+                words.append(word)
+
+        text = " ".join(words)
+        print("📝 OCR FILTERED:", text)
+
+        # Also reply raw OCR to Telegram for debugging
+        await update.message.reply_text(f"📝 OCR words (conf>60):\n{text}")
+
 
         # Show raw OCR result to user (escaped for Markdown)
         safe_text = escape_markdown(text.strip() or "(empty)", version=2)
