@@ -5,6 +5,8 @@ import os
 import re
 from collections import deque
 from datetime import datetime
+from server import run_server
+import threading
 
 import psycopg2
 import psycopg2.extras
@@ -384,5 +386,8 @@ def main():
     app.run_polling()   # <-- no await
 
 if __name__ == "__main__":
-    main()
+    # start dummy HTTP server in background thread
+    threading.Thread(target=run_server, daemon=True).start()
 
+    # run Telegram bot
+    main()
