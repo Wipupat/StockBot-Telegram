@@ -512,7 +512,10 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "\/export – Export all trades to CSV\n\n"
         "You can also send a broker *screenshot*, I'll OCR it 📸"
     )
-    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
+    # await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
+    await update.message.reply_text(
+    msg.replace("*", "<b>").replace("*", "</b>"),
+    parse_mode=ParseMode.HTML)
 
 
 # ---- App bootstrap ----
