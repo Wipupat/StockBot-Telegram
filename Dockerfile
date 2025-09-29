@@ -1,19 +1,26 @@
-FROM python:3.11.8-slim-bullseye
+FROM python:3.11-slim
 
-# Upgrade system packages and install tesseract with Thai & English language packs
-# RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
-#     tesseract-ocr tesseract-ocr-eng tesseract-ocr-tha \
-#     libtesseract-dev build-essential \
-#     && apt-get clean \
-#     && rm -rf /var/lib/apt/lists/*
+# Install Tesseract + dependencies
+RUN apt-get update && apt-get install -y \
+    tesseract-ocr \
+    libtesseract-dev \
+    libleptonica-dev \
+    && rm -rf /var/lib/apt/lists/*
 
+# Set working dir
 WORKDIR /app
+
+# Copy requirements first (for cache efficiency)
 COPY requirements.txt .
+
+# Install Python deps
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy everything
+# Copy app code
 COPY . .
 
-# Render calls this by default if you set it as the start command, or via render.yaml
-CMD ["python", "main.py"]
+# Expose dummy healthcheck port
 EXPOSE 10000
+
+# Start bot
+CMD ["python", "main.py"]
