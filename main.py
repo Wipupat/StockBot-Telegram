@@ -402,7 +402,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f.write(byts)
 
         img = preprocess_image(tmp_path)  # <-- grayscale + binarize + sharpen
+        img = ImageEnhance.Contrast(img).enhance(2.0)
         text = pytesseract.image_to_string(img, lang="eng+tha")
+
+        # Show raw OCR result to user (escaped for Markdown)
+        safe_text = escape_markdown(text.strip() or "(empty)", version=2)
+        await update.message.reply_text(f"📝 OCR Text:\n```\n{safe_text}\n```", parse_mode=ParseMode.MARKDOWN_V2)
 
         action, symbol, price, qty, fee, tx_time = ocr_extract(text)
 
