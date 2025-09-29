@@ -407,7 +407,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         action, symbol, price, qty, fee, tx_time = ocr_extract(text)
 
         if not (action and symbol and price):
-            return await update.message.reply_text("⚠️ Could not parse screenshot.")
+            print(f"⚠️ Could not parse screenshot from user {user_id}: {text}")
+            return await update.message.reply_text(f"⚠️ Could not parse screenshot from user {user_id}: {text}")
 
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(
