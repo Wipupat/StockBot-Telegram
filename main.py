@@ -18,7 +18,7 @@ from telegram.ext import (
 import pytz
 from PIL import Image, ImageEnhance, ImageFilter
 from telegram.helpers import escape_markdown
-import yfinance as yf
+import requests
 
 # ---- Config ----
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -32,21 +32,39 @@ try:
 except Exception:
     USE_OCR = False
 
+def fetch_stooq_price(symbol_code: str):
+    url = f"https://stooq.com/q/l/?s={symbol_code}&f=sd2t2ohlcv&h&e=csv"
+    resp = requests.get(url, timeout=5)
+    resp.raise_for_status()
+    reader = csv.DictReader(io.StringIO(resp.text))
+    row = next(reader, None)
+    if not row:
+        return None
+    close = row.get("Close")
+    if not close or close in {"N/A", "0"}:
+        return None
+    return float(close)
 
 
 def get_latest_price(symbol):
-    try:
-        ticker = yf.Ticker(symbol)
-        data = ticker.history(period="1d")
-        return float(data["Close"].iloc[-1])
-    except Exception as e:
-        print("⚠️ Price fetch failed:", e)
-        return None
+    symbol = symbol.strip().lower()
+    candidates = [symbol]
+    if "." not in symbol:
+        candidates.append(f"{symbol}.us")
+
+    for code in candidates:
+        try:
+            price = fetch_stooq_price(code)
+            if price is not None:
+                return price
+        except Exception as e:
+            print(f"⚠️ Price fetch failed for {code}:", e)
+
+    return None
 
 # ---- DB helpers ----
 def get_conn():
     return psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.DictCursor)
-
 
 def init_db():
     with get_conn() as conn, conn.cursor() as cur:
@@ -68,7 +86,6 @@ def init_db():
         """)
         conn.commit()
 
-
 # ---- Utility ----
 def parse_keyvals(parts):
     out = {}
@@ -77,7 +94,6 @@ def parse_keyvals(parts):
             k, v = p.split("=", 1)
             out[k.strip().lower()] = v.strip()
     return out
-
 
 def parse_time(s: str | None):
     if not s:
@@ -164,7 +180,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/profit [SYMBOL]\n"
         "/profit_today – Show today’s realized P&L\n"
         "/sum SYMBOL  — list trades + totals\n"
-        "/export      — CSV of all trades"
+        "/export      — CSV of all trades\n"
+        "/clear SYMBOL|all — remove trades"
     )
 
 async def add_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -389,6 +406,36 @@ async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def clear_trades(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not context.args:
+        return await update.message.reply_text("Usage: /clear SYMBOL|all")
+
+    target = context.args[0].strip().lower()
+    delete_query = """DELETE FROM trades WHERE telegram_user_id=%s"""
+    params = [user_id]
+
+    if target != "all":
+        delete_query += " AND symbol=%s"
+        params.append(target.upper())
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(delete_query, params)
+        deleted = cur.rowcount
+        conn.commit()
+
+    if deleted == 0:
+        if target == "all":
+            return await update.message.reply_text("No trades to remove.")
+        return await update.message.reply_text(f"No trades found for {target.upper()}.")
+
+    if target == "all":
+        msg = f"🧹 Removed all trades ({deleted} rows)."
+    else:
+        msg = f"🧹 Removed {deleted} trades for {target.upper()}."
+    await update.message.reply_text(msg)
+
+
 # ---- OCR from screenshots ----
 def ocr_extract(text: str):
     print("📝 OCR RAW:", repr(text))
@@ -509,7 +556,8 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "\/profit [SYMBOL] – Show realized\/open P&L\n"
         "\/profit\_today – Show today’s realized P&L\n"
         "\/sum SYMBOL – List trades and totals\n"
-        "\/export – Export all trades to CSV\n\n"
+        "\/export – Export all trades to CSV\n"
+        "\/clear SYMBOL|all – Remove trades\n\n"
         "You can also send a broker *screenshot*, I'll OCR it 📸"
     )
     # await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
@@ -531,6 +579,7 @@ def main():
     app.add_handler(CommandHandler("profit", profit))
     app.add_handler(CommandHandler("profit_today", profit_today))
     app.add_handler(CommandHandler("export", export_csv))
+    app.add_handler(CommandHandler("clear", clear_trades))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^addb "), add_buy))
