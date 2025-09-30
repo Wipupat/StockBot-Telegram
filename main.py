@@ -33,17 +33,35 @@ except Exception:
     USE_OCR = False
 
 def fetch_stooq_price(symbol_code: str):
-    url = f"https://stooq.com/q/l/?s={symbol_code}&f=sd2t2ohlcv&h&e=csv"
-    resp = requests.get(url, timeout=5)
-    resp.raise_for_status()
-    reader = csv.DictReader(io.StringIO(resp.text))
-    row = next(reader, None)
-    if not row:
-        return None
-    close = row.get("Close")
-    if not close or close in {"N/A", "0"}:
-        return None
-    return float(close)
+    paths = [
+        "https://stooq.com/q/l/?s={symbol}&f=sd2t2ohlcv&h&e=csv",
+        "https://stooq.pl/q/l/?s={symbol}&f=sd2t2ohlcv&h&e=csv",
+        "http://stooq.com/q/l/?s={symbol}&f=sd2t2ohlcv&h&e=csv",
+        "http://stooq.pl/q/l/?s={symbol}&f=sd2t2ohlcv&h&e=csv",
+    ]
+    headers = {"User-Agent": "StockBot/1.0"}
+    last_error = None
+
+    for endpoint in paths:
+        url = endpoint.format(symbol=symbol_code)
+        try:
+            resp = requests.get(url, timeout=6, headers=headers)
+            resp.raise_for_status()
+            reader = csv.DictReader(io.StringIO(resp.text))
+            row = next(reader, None)
+            if not row:
+                continue
+            close = row.get("Close")
+            if not close or close in {"N/A", "0"}:
+                continue
+            return float(close)
+        except requests.RequestException as exc:
+            last_error = exc
+            continue
+
+    if last_error:
+        print(f"⚠️ Stooq fetch failed for {symbol_code}:", last_error)
+    return None
 
 
 def get_latest_price(symbol):
