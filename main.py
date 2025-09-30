@@ -181,7 +181,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/profit_today – Show today’s realized P&L\n"
         "/sum SYMBOL  — list trades + totals\n"
         "/export      — CSV of all trades\n"
-        "/clear SYMBOL|all — remove trades"
+        "/clear SYMBOL|all|last — remove trades"
     )
 
 async def add_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -409,17 +409,59 @@ async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def clear_trades(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not context.args:
-        return await update.message.reply_text("Usage: /clear SYMBOL|all")
+        return await update.message.reply_text("Usage: /clear SYMBOL|all|last [SYMBOL]")
 
     target = context.args[0].strip().lower()
-    delete_query = """DELETE FROM trades WHERE telegram_user_id=%s"""
-    params = [user_id]
-
-    if target != "all":
-        delete_query += " AND symbol=%s"
-        params.append(target.upper())
 
     with get_conn() as conn, conn.cursor() as cur:
+        if target == "last":
+            symbol_filter = context.args[1].upper() if len(context.args) > 1 else None
+            if symbol_filter:
+                cur.execute(
+                    """DELETE FROM trades
+                           WHERE id = (
+                               SELECT id FROM trades
+                               WHERE telegram_user_id=%s AND symbol=%s
+                               ORDER BY COALESCE(tx_time, created_at) DESC
+                               LIMIT 1
+                           )
+                           RETURNING action, symbol, qty, price""",
+                    (user_id, symbol_filter),
+                )
+            else:
+                cur.execute(
+                    """DELETE FROM trades
+                           WHERE id = (
+                               SELECT id FROM trades
+                               WHERE telegram_user_id=%s
+                               ORDER BY COALESCE(tx_time, created_at) DESC
+                               LIMIT 1
+                           )
+                           RETURNING action, symbol, qty, price""",
+                    (user_id,),
+                )
+
+            row = cur.fetchone()
+            conn.commit()
+            if not row:
+                if symbol_filter:
+                    return await update.message.reply_text(f"No trades found for {symbol_filter}.")
+                return await update.message.reply_text("No trades to remove.")
+
+            action, symbol, qty, price = row
+            msg = (
+                f"🧹 Removed last trade: {action} {float(qty):g} {symbol.upper()} "
+                f"@ {float(price):.2f}"
+            )
+            return await update.message.reply_text(msg)
+
+        delete_query = """DELETE FROM trades WHERE telegram_user_id=%s"""
+        params = [user_id]
+
+        if target != "all":
+            delete_query += " AND symbol=%s"
+            params.append(target.upper())
+
         cur.execute(delete_query, params)
         deleted = cur.rowcount
         conn.commit()
@@ -557,7 +599,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "\/profit\_today – Show today’s realized P&L\n"
         "\/sum SYMBOL – List trades and totals\n"
         "\/export – Export all trades to CSV\n"
-        "\/clear SYMBOL|all – Remove trades\n\n"
+        "\/clear SYMBOL|all|last – Remove trades\n\n"
         "You can also send a broker *screenshot*, I'll OCR it 📸"
     )
     # await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
