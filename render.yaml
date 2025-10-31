@@ -1,18 +1,34 @@
+# services:
+#   - type: web
+#     name: stock-telegram-bot
+#     env: docker
+#     plan: free
+#     autoDeploy: true
+#     region: singapore
+#     envVars:
+#       - key: TELEGRAM_BOT_TOKEN
+#         sync: false     # set in dashboard
+#       - key: DATABASE_URL
+#         fromDatabase:
+#           name: stockbot-db
+#           property: connectionString
+
+# databases:
+#   - name: stockbot-db
+#     plan: free
+
 services:
   - type: web
     name: stock-telegram-bot
     env: docker
     plan: free
+    region: singapore
     autoDeploy: true
-    region: oregon
+    healthCheckPath: /
     envVars:
       - key: TELEGRAM_BOT_TOKEN
-        sync: false     # set in dashboard
+        sync: false              # stored securely in Render dashboard
       - key: DATABASE_URL
-        fromDatabase:
-          name: stockbot-db
-          property: connectionString
-
-databases:
-  - name: stockbot-db
-    plan: free
+        sync: false              # stored securely in Render dashboard (your Neon URL)
+      - key: PORT
+        value: 10000
