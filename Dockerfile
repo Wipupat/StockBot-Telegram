@@ -1,28 +1,16 @@
 FROM python:3.11-slim
 
-RUN apt-get update && apt-get install -y \
-    tesseract-ocr \
-    tesseract-ocr-tha \
-    libtesseract-dev \
-    libleptonica-dev \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tesseract-ocr tesseract-ocr-tha libtesseract-dev libleptonica-dev curl \
+ && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get install -y tesseract-ocr-tha
-
-# Set working dir
 WORKDIR /app
-
-# Copy requirements first (for cache efficiency)
 COPY requirements.txt .
-
-# Install Python deps
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy app code
 COPY . .
 
-# Expose dummy healthcheck port
-EXPOSE 10000
+# optional: healthcheck that hits your own app using $PORT
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD sh -c 'curl -fsS "http://localhost:${PORT}/healthz?ts=$(date +%s)" || exit 1'
 
-# Start bot
 CMD ["python", "main.py"]
